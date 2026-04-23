@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-discogs_monitor/init.py
+DiscogsMonitor/init.py
 
 Scans prices from all URLs in watchlist.json and saves the baseline state
 to the scans/ directory. Run once before using check.py for the first time.
