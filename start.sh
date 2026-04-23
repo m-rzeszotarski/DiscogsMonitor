@@ -38,6 +38,40 @@ info()    { echo "[INFO]  $*"; }
 success() { echo "[OK]    $*"; }
 error()   { echo "[ERROR] $*" >&2; }
 
+ensure_pip() {
+    if $PYTHON -m pip --version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    info "pip is missing for $PYTHON - trying to bootstrap with ensurepip..."
+    if $PYTHON -m ensurepip --upgrade --user >/dev/null 2>&1; then
+        hash -r
+    fi
+
+    if $PYTHON -m pip --version >/dev/null 2>&1; then
+        success "pip bootstrapped successfully."
+        return 0
+    fi
+
+    return 1
+}
+
+install_python_deps() {
+    local deps=(requests beautifulsoup4 cloudscraper)
+
+    if $PYTHON -m pip --version >/dev/null 2>&1; then
+        $PYTHON -m pip install --quiet --user "${deps[@]}"
+        return 0
+    fi
+
+    if command -v pip3 >/dev/null 2>&1; then
+        pip3 install --quiet --user "${deps[@]}"
+        return 0
+    fi
+
+    return 1
+}
+
 send_push() {
     local title="$1"
     local body="$2"
@@ -139,8 +173,22 @@ success "curl: $(curl --version | head -1)"
 info "Checking Python dependencies..."
 if ! $PYTHON -c "import requests, bs4, cloudscraper" 2>/dev/null; then
     info "Dependencies missing – installing..."
-    $PYTHON -m pip install --quiet --user requests beautifulsoup4 cloudscraper
-    success "Dependencies installed."
+    if ! ensure_pip; then
+        error "Cannot find a working pip for $PYTHON."
+        error "Install pip system package and run start.sh again:"
+        error "  Debian/Ubuntu: sudo apt install python3-pip"
+        error "  Fedora/RHEL:   sudo dnf install python3-pip"
+        error "  Arch Linux:    sudo pacman -S python-pip"
+        exit 1
+    fi
+
+    if install_python_deps; then
+        success "Dependencies installed."
+    else
+        error "Dependency installation failed."
+        error "Try manually: $PYTHON -m pip install --user requests beautifulsoup4 cloudscraper"
+        exit 1
+    fi
 else
     success "Dependencies OK (requests, beautifulsoup4, cloudscraper)."
 fi
