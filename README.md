@@ -1,4 +1,4 @@
-# Discogs Monitor
+# DiscogsMonitor
 
 A Python script that monitors Discogs marketplace listings and sends a push notification via [ntfy](https://ntfy.sh) whenever a new listing appears.
 
@@ -9,7 +9,7 @@ Discogs listing pages are sorted newest-first (`listed,desc`). The script saves 
 ## Project structure
 
 ```
-discogs_monitor/
+DiscogsMonitor/
 ├── init.py            # One-time baseline scan – run before first use
 ├── check.py           # Detects new listings and sends notifications
 ├── discogs_lib.py     # Shared utilities (parsing, URL validation, etc)
