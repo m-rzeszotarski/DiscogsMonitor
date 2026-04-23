@@ -54,6 +54,22 @@ detect_pip_package_cmd() {
     return 1
 }
 
+detect_venv_package_cmd() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "sudo apt-get update && sudo apt-get install -y python3-venv"
+        return 0
+    fi
+    if command -v dnf >/dev/null 2>&1; then
+        echo "sudo dnf install -y python3-venv"
+        return 0
+    fi
+    if command -v pacman >/dev/null 2>&1; then
+        echo "sudo pacman -S --noconfirm python-virtualenv"
+        return 0
+    fi
+    return 1
+}
+
 install_system_pip_if_accepted() {
     local install_cmd=""
     local answer=""
@@ -69,6 +85,35 @@ install_system_pip_if_accepted() {
     echo ""
     info "pip could not be bootstrapped automatically."
     echo "This system can install pip using:"
+    echo "  $install_cmd"
+    read -r -p "Run this now? [y/N]: " answer
+
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        if eval "$install_cmd"; then
+            hash -r
+            return 0
+        fi
+        return 1
+    fi
+
+    return 1
+}
+
+install_system_venv_if_accepted() {
+    local install_cmd=""
+    local answer=""
+
+    if ! install_cmd="$(detect_venv_package_cmd)"; then
+        return 1
+    fi
+
+    if [[ ! -t 0 ]]; then
+        return 1
+    fi
+
+    echo ""
+    info "The Python venv module is not available."
+    echo "This system can install venv support using:"
     echo "  $install_cmd"
     read -r -p "Run this now? [y/N]: " answer
 
@@ -138,11 +183,17 @@ ensure_virtualenv_python() {
     if [[ ! -x "$VENV_DIR/bin/python" ]]; then
         info "Creating project virtual environment: $VENV_DIR"
         if ! "$base_python" -m venv "$VENV_DIR" >/dev/null 2>&1; then
-            error "Could not create virtual environment. Install python3-venv and retry."
-            error "  Debian/Ubuntu: sudo apt install python3-venv"
-            error "  Fedora/RHEL:   sudo dnf install python3-venv"
-            error "  Arch Linux:    sudo pacman -S python-virtualenv"
-            return 1
+            error "Could not create virtual environment."
+            info "Trying system package manager fallback for venv support..."
+            if install_system_venv_if_accepted && "$base_python" -m venv "$VENV_DIR" >/dev/null 2>&1; then
+                success "Virtual environment support installed successfully."
+            else
+                error "Install python3-venv and retry."
+                error "  Debian/Ubuntu: sudo apt install python3-venv"
+                error "  Fedora/RHEL:   sudo dnf install python3-venv"
+                error "  Arch Linux:    sudo pacman -S python-virtualenv"
+                return 1
+            fi
         fi
     fi
 
@@ -161,23 +212,6 @@ install_python_deps() {
         fi
         error "Failed to install dependencies in virtualenv: $VENV_DIR"
         return 1
-    fi
-
-    # Fallback to user installs when virtualenv cannot be created.
-    if ! ensure_pip; then
-        return 1
-    fi
-
-    if "$PYTHON" -m pip --version >/dev/null 2>&1; then
-        if "$PYTHON" -m pip install --quiet --user "${deps[@]}"; then
-            return 0
-        fi
-    fi
-
-    if command -v pip3 >/dev/null 2>&1; then
-        if pip3 install --quiet --user "${deps[@]}"; then
-            return 0
-        fi
     fi
 
     return 1
