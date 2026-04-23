@@ -23,13 +23,13 @@ PYTHON="${PYTHON:-python3}"
 
 # Absolute path
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${DISCOGS_VENV_DIR:-$SCRIPT_DIR/.venv}"
 CONFIG_FILE="$SCRIPT_DIR/config.py"
 
 INIT_SCRIPT="$SCRIPT_DIR/init.py"
 CHECK_SCRIPT="$SCRIPT_DIR/check.py"
 LOG_DIR="${DISCOGS_LOGS_DIR:-$SCRIPT_DIR/logs}"
 LOG_FILE="$LOG_DIR/check.log"
-CRON_JOB="*/$CRON_INTERVAL * * * * cd \"$SCRIPT_DIR\" && export DISCOGS_NTFY_URL=\"$NTFY_BASE_URL\" && $PYTHON \"$CHECK_SCRIPT\" 2>&1"
 CRON_MARKER="# discogs-monitor"
 
 # ─────────────────────── Helper functions ────────────────────────────────────
@@ -132,20 +132,63 @@ bootstrap_pip_with_get_pip() {
     $PYTHON -m pip --version >/dev/null 2>&1
 }
 
+ensure_virtualenv_python() {
+    local base_python="$PYTHON"
+
+    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+        info "Creating project virtual environment: $VENV_DIR"
+        if ! "$base_python" -m venv "$VENV_DIR" >/dev/null 2>&1; then
+            error "Could not create virtual environment. Install python3-venv and retry."
+            error "  Debian/Ubuntu: sudo apt install python3-venv"
+            error "  Fedora/RHEL:   sudo dnf install python3-venv"
+            error "  Arch Linux:    sudo pacman -S python-virtualenv"
+            return 1
+        fi
+    fi
+
+    PYTHON="$VENV_DIR/bin/python"
+    success "Using virtual environment Python: $PYTHON"
+    return 0
+}
+
 install_python_deps() {
     local deps=(requests beautifulsoup4 cloudscraper)
 
-    if $PYTHON -m pip --version >/dev/null 2>&1; then
-        $PYTHON -m pip install --quiet --user "${deps[@]}"
-        return 0
+    # Prefer local virtualenv on modern distros with externally managed Python.
+    if ensure_virtualenv_python; then
+        if "$PYTHON" -m pip install --quiet "${deps[@]}"; then
+            return 0
+        fi
+        error "Failed to install dependencies in virtualenv: $VENV_DIR"
+        return 1
+    fi
+
+    # Fallback to user installs when virtualenv cannot be created.
+    if ! ensure_pip; then
+        return 1
+    fi
+
+    if "$PYTHON" -m pip --version >/dev/null 2>&1; then
+        if "$PYTHON" -m pip install --quiet --user "${deps[@]}"; then
+            return 0
+        fi
     fi
 
     if command -v pip3 >/dev/null 2>&1; then
-        pip3 install --quiet --user "${deps[@]}"
-        return 0
+        if pip3 install --quiet --user "${deps[@]}"; then
+            return 0
+        fi
     fi
 
     return 1
+}
+
+verify_python_deps() {
+    "$PYTHON" -c "import requests, bs4, cloudscraper" 2>/dev/null
+}
+
+build_cron_job() {
+    echo "*/$CRON_INTERVAL * * * * cd \"$SCRIPT_DIR\" && export DISCOGS_NTFY_URL=\"$NTFY_BASE_URL\" && $PYTHON \"$CHECK_SCRIPT\" 2>&1"
 }
 
 send_push() {
@@ -247,22 +290,18 @@ fi
 success "curl: $(curl --version | head -1)"
 
 info "Checking Python dependencies..."
-if ! $PYTHON -c "import requests, bs4, cloudscraper" 2>/dev/null; then
+if ! verify_python_deps; then
     info "Dependencies missing – installing..."
-    if ! ensure_pip; then
-        error "Cannot find a working pip for $PYTHON."
-        error "Install pip system package and run start.sh again:"
-        error "  Debian/Ubuntu: sudo apt install python3-pip"
-        error "  Fedora/RHEL:   sudo dnf install python3-pip"
-        error "  Arch Linux:    sudo pacman -S python-pip"
-        exit 1
-    fi
-
     if install_python_deps; then
-        success "Dependencies installed."
+        if verify_python_deps; then
+            success "Dependencies installed."
+        else
+            error "Dependencies still not importable with $PYTHON"
+            exit 1
+        fi
     else
         error "Dependency installation failed."
-        error "Try manually: $PYTHON -m pip install --user requests beautifulsoup4 cloudscraper"
+        error "Try manually in venv: python3 -m venv .venv && .venv/bin/pip install requests beautifulsoup4 cloudscraper"
         exit 1
     fi
 else
@@ -313,6 +352,8 @@ if echo "$CURRENT_CRON" | grep -qF "$CRON_MARKER"; then
 else
     NEW_CRON="$CURRENT_CRON"
 fi
+
+CRON_JOB="$(build_cron_job)"
 
 (
     echo "$NEW_CRON"
