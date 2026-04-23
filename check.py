@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-discogs_monitor/check.py
+DiscogsMonitor/check.py
 
 Checks Discogs listings against the saved baseline and sends a push
 notification via ntfy when new listings appear.
@@ -32,7 +32,7 @@ from discogs_lib import (
 os.makedirs(config.LOGS_DIR, exist_ok=True)
 
 # Setup rotating file logger
-logger = logging.getLogger("discogs_monitor")
+logger = logging.getLogger("discogsmonitor")
 logger.setLevel(logging.DEBUG)
 
 handler = logging.handlers.RotatingFileHandler(
@@ -215,7 +215,7 @@ def main():
         log(f"[ERROR] '{config.SCANS_DIR}' directory not found. Run init.py first.")
         try:
             send_push(
-                "Discogs Monitor – critical error",
+                "DiscogsMonitor – critical error",
                 f"'{config.SCANS_DIR}' directory not found.\nRun init.py first.",
                 priority="urgent",
                 tags="warning",
@@ -288,7 +288,7 @@ def main():
 
             try:
                 send_push(
-                    f"Discogs Monitor – scan error: {name}",
+                    f"DiscogsMonitor – scan error: {name}",
                     f"Failed to fetch page.\n\nError: {err_msg}\n\nURL: {url}",
                     priority="high",
                     tags="warning",
