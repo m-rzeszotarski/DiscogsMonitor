@@ -13,6 +13,7 @@ import json
 import logging
 import logging.handlers
 import os
+import random
 import sys
 import time
 
@@ -53,6 +54,12 @@ logger.addHandler(console)
 def log(msg: str):
     """Log a message to file and console."""
     logger.info(msg)
+
+
+def sleep_with_jitter(base_delay: int, jitter: int) -> None:
+    """Sleep with optional random jitter to avoid fixed request cadence."""
+    delay = base_delay + (random.randint(0, jitter) if jitter > 0 else 0)
+    time.sleep(delay)
 
 
 # ─────────────────────────── FUNCTIONS ───────────────────────────────────────
@@ -209,6 +216,12 @@ def load_watchlist() -> list[dict]:
 
 
 def main():
+    if config.CHECK_STARTUP_JITTER > 0:
+        startup_delay = random.randint(0, config.CHECK_STARTUP_JITTER)
+        if startup_delay > 0:
+            log(f"[INFO] Startup jitter: sleeping {startup_delay}s before check.")
+            time.sleep(startup_delay)
+
     log("=== Starting check ===")
 
     if not os.path.exists(config.SCANS_DIR):
@@ -279,7 +292,7 @@ def main():
             log(f"      [URL ERROR] {val_exc}")
             overall_errors.append(f"#{idx} '{name}': {val_exc}")
             if idx < len(watchlist) - 1:
-                time.sleep(config.DELAY_BETWEEN)
+                sleep_with_jitter(config.DELAY_BETWEEN, config.DELAY_JITTER)
             continue
         except Exception as exc:
             err_msg = str(exc)
@@ -298,7 +311,7 @@ def main():
                 log(f"      [PUSH ERROR] {push_exc}")
 
             if idx < len(watchlist) - 1:
-                time.sleep(config.DELAY_BETWEEN)
+                sleep_with_jitter(config.DELAY_BETWEEN, config.DELAY_JITTER)
             continue
 
         # ── Compare with the previous scan ───────────────────────────────────
@@ -344,7 +357,7 @@ def main():
                 save_scan(scan_file, new_scan)
 
         if idx < len(watchlist) - 1:
-            time.sleep(config.DELAY_BETWEEN)
+            sleep_with_jitter(config.DELAY_BETWEEN, config.DELAY_JITTER)
 
     log("=== Check complete ===")
     if overall_errors:
