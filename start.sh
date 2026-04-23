@@ -1,252 +1,149 @@
-#!/usr/bin/env bash
-# start.sh – initialises Discogs Monitor and registers check.py in crontab
-#
-# Usage:
-#   chmod +x start.sh
-#   ./start.sh
-#
-# Does NOT require sudo – each user has their own crontab.
+# DiscogsMonitor
 
-set -euo pipefail
+A Python script that monitors Discogs marketplace listings and sends a push notification via [ntfy](https://ntfy.sh) whenever a new listing appears.
 
-# ─────────────────────────── CONFIG ──────────────────────────────────────────
+## How it works
 
-NTFY_BASE_URL="${DISCOGS_NTFY_URL:-https://ntfy.sh}"
+Discogs listing pages are sorted newest-first (`listed,desc`). The script saves a baseline snapshot of current listings using listing IDs and stable metadata, then on every subsequent run compares the live page against that snapshot. New offers are detected by unique item identifiers.
 
-# Scans interval [min]
-CRON_INTERVAL=5
+## Project structure
 
-# Python interpreter
-PYTHON="${PYTHON:-python3}"
+```
+DiscogsMonitor/
+├── init.py            # One-time baseline scan – run before first use
+├── check.py           # Detects new listings and sends notifications
+├── discogs_lib.py     # Shared utilities (parsing, URL validation, etc)
+├── config.py          # Configuration from environment variables
+├── start.sh           # Setup script: runs init, registers cron job, sends test push
+├── watchlist.json     # List of releases to monitor
+├── scans/             # Created automatically by init.py
+└── logs/              # Created automatically (with automatic rotation)
+    └── check.log
+```
 
-# ─────────────────────────────────────────────────────────────────────────────
+## Requirements
 
-# Absolute path
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="$SCRIPT_DIR/config.py"
+- Python 3.10+
+- `requests`, `beautifulsoup4`, and `cloudscraper` (installed automatically by `start.sh`)
+  - `cloudscraper` - bypasses Cloudflare protection on Discogs
+- `curl` (for push notifications in `start.sh`)
+- [ntfy](https://ntfy.sh) app on your phone
 
-INIT_SCRIPT="$SCRIPT_DIR/init.py"
-CHECK_SCRIPT="$SCRIPT_DIR/check.py"
-LOG_DIR="${DISCOGS_LOGS_DIR:-$SCRIPT_DIR/logs}"
-LOG_FILE="$LOG_DIR/check.log"
-CRON_JOB="*/$CRON_INTERVAL * * * * cd \"$SCRIPT_DIR\" && export DISCOGS_NTFY_URL=\"$NTFY_BASE_URL\" && $PYTHON \"$CHECK_SCRIPT\" 2>&1"
-CRON_MARKER="# discogs-monitor"
+## Setup
 
-# ─────────────────────── Helper functions ────────────────────────────────────
+### 1. Configure watchlist.json
 
-info()    { echo "[INFO]  $*"; }
-success() { echo "[OK]    $*"; }
-error()   { echo "[ERROR] $*" >&2; }
+Add the releases you want to monitor. The `link` should point to the marketplace page:
 
-send_push() {
-    local title="$1"
-    local body="$2"
-    local priority="${3:-default}"
-    local tags="${4:-}"
-    local NTFY_TOPIC=$($PYTHON -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); from config import NTFY_TOPIC; print(NTFY_TOPIC)")
-    if [[ -z "${NTFY_TOPIC// /}" ]]; then
-        error "NTFY_TOPIC is empty in config.py"
-        return 1
-    fi
+```json
+[
+  {
+    "name": "My Favourite Record",
+    "link": "https://www.discogs.com/sell/release/RELEASE_ID?sort=listed%2Cdesc&limit=25"
+  }
+]
+```
 
-    curl -s \
-        -H "Title: $title" \
-        -H "Priority: $priority" \
-        ${tags:+-H "Tags: $tags"} \
-        -d "$body" \
-        "$NTFY_BASE_URL/$NTFY_TOPIC" \
-        --max-time 10 \
-        -o /dev/null
-}
+**Note**: The script automatically validates and normalizes the `sort` query parameter to newest-first (`sort=listed,desc`), including URL-encoded variants (for example `sort=listed%2Cdesc`). If `sort` is missing, it is added automatically.
 
-get_config_topic() {
-    $PYTHON -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); from config import NTFY_TOPIC; print(NTFY_TOPIC)"
-}
+How to find the link:
+1. Open a release page on Discogs
+2. Click **For Sale**
+3. Set sorting to **Listed Newest**
+4. Copy the URL from the address bar
 
-set_config_topic() {
-    local topic="$1"
-    TOPIC="$topic" CONFIG_PATH="$CONFIG_FILE" $PYTHON <<'PY'
-import os
-import re
-from pathlib import Path
+### 2. [Optional] Configure environment variables
 
-path = Path(os.environ["CONFIG_PATH"])
-topic = os.environ["TOPIC"]
-text = path.read_text(encoding="utf-8")
-updated, count = re.subn(r'(?m)^NTFY_TOPIC\s*=\s*".*"\s*$', f'NTFY_TOPIC = "{topic}"', text)
-if count != 1:
-    raise SystemExit("Could not update NTFY_TOPIC in config.py")
-path.write_text(updated, encoding="utf-8")
-PY
-}
+Edit `.env` or export variables before running:
 
-ensure_ntfy_topic() {
-    local current_topic
-    current_topic="$(get_config_topic)"
+```bash
+# Paths
+export DISCOGS_WATCHLIST=/path/to/watchlist.json       # default: ./watchlist.json
+export DISCOGS_SCANS_DIR=/path/to/scans                # default: ./scans
+export DISCOGS_LOGS_DIR=/path/to/logs                  # default: ./logs
+export DISCOGS_LOG_MAX_SIZE=5242880                     # 5MB, rotate when exceeded
+export DISCOGS_LOG_BACKUPS=5                           # Keep 5 old log files
 
-    if [[ -n "${DISCOGS_NTFY_TOPIC:-}" ]]; then
-        if [[ "$current_topic" != "$DISCOGS_NTFY_TOPIC" ]]; then
-            info "Setting ntfy topic from DISCOGS_NTFY_TOPIC env var."
-            set_config_topic "$DISCOGS_NTFY_TOPIC"
-            success "ntfy topic updated in config.py"
-        fi
-        return
-    fi
+# Scraping
+export DISCOGS_TIMEOUT=15                              # Request timeout (seconds)
+export DISCOGS_RETRIES=3                               # Retry attempts
+export DISCOGS_DELAY=3                                 # Delay between requests (seconds)
 
-    if [[ -n "${current_topic// /}" ]]; then
-        return
-    fi
+# ntfy base URL
+export DISCOGS_NTFY_URL=https://ntfy.sh                # or your self-hosted instance
 
-    echo ""
-    info "NTFY_TOPIC is empty in config.py"
-    echo "Choose your unique ntfy topic (letters, digits, ., _, -)."
+# optional: set topic non-interactively for start.sh
+export DISCOGS_NTFY_TOPIC=your-unique-topic
+```
 
-    while true; do
-        read -r -p "Enter ntfy topic: " topic
-        if [[ -z "${topic// /}" ]]; then
-            error "Topic cannot be empty."
-            continue
-        fi
-        if [[ ! "$topic" =~ ^[A-Za-z0-9._-]+$ ]]; then
-            error "Invalid topic. Allowed characters: letters, digits, ., _, -"
-            continue
-        fi
-        set_config_topic "$topic"
-        success "ntfy topic saved to config.py"
-        break
-    done
-}
+### 3. Install the ntfy app
 
-# ─────────────────────── Requirements check ──────────────────────────────────
+Install [ntfy](https://ntfy.sh) on your phone and create your own unique topic (for example `my-discogs-alerts-2026`).
+Subscribe to that topic in the app.
 
-echo "========================================"
-echo " Discogs Monitor - setup"
-echo "========================================"
-echo ""
+Set the same value in `config.py` (`NTFY_TOPIC = "..."`) or provide `DISCOGS_NTFY_TOPIC` when running `start.sh`.
 
-if ! command -v "$PYTHON" &>/dev/null; then
-    error "Python not found ('$PYTHON'). Install Python 3 or set the PYTHON env var."
-    exit 1
-fi
-success "Python: $($PYTHON --version)"
+If `NTFY_TOPIC` is empty, `start.sh` will prompt you for a topic and save it to `config.py` automatically.
 
-if ! command -v curl &>/dev/null; then
-    error "curl not found. Install it: sudo apt install curl"
-    exit 1
-fi
-success "curl: $(curl --version | head -1)"
+Alternatively, [self-host ntfy](https://docs.ntfy.sh/install/) on your homelab and set `DISCOGS_NTFY_URL`.
 
-info "Checking Python dependencies..."
-if ! $PYTHON -c "import requests, bs4, cloudscraper" 2>/dev/null; then
-    info "Dependencies missing – installing..."
-    $PYTHON -m pip install --quiet --user requests beautifulsoup4 cloudscraper
-    success "Dependencies installed."
-else
-    success "Dependencies OK (requests, beautifulsoup4, cloudscraper)."
-fi
+### 4. Run the setup script
 
-if [[ ! -f "$SCRIPT_DIR/watchlist.json" ]]; then
-    error "watchlist.json not found in $SCRIPT_DIR"
-    exit 1
-fi
-success "watchlist.json found."
+```bash
+chmod +x start.sh
+./start.sh
+```
 
-ensure_ntfy_topic
+`start.sh` will:
+1. Check for Python, curl, and required libraries (installing them if needed)
+2. Run `init.py` to save the current state of all watched listings
+3. Add `check.py` to your user crontab (no sudo required), running every 5 minutes
+4. Send a test push notification so you can confirm ntfy is working
 
-# ─────────────────────── Log directory ───────────────────────────────────────
+## Manual usage
 
-mkdir -p "$LOG_DIR"
-success "Log directory: $LOG_DIR"
+Run the baseline scan manually:
+```bash
+python3 init.py
+```
 
-# ─────────────────────── Run init.py ─────────────────────────────────────────
+Run a check manually:
+```bash
+python3 check.py
+```
 
-echo ""
-info "Running init.py..."
-echo "----------------------------------------"
-cd "$SCRIPT_DIR"
-if $PYTHON "$INIT_SCRIPT"; then
-    echo "----------------------------------------"
-    success "init.py completed successfully."
-else
-    echo "----------------------------------------"
-    error "init.py failed."
-    send_push "Discogs Monitor - init failed" \
-        "init.py exited with an error. Check the output." \
-        "high" "warning" || true
-    exit 1
-fi
+## Detection logic
 
-# ─────────────────────── Register cron job ───────────────────────────────────
+| Situation | Result |
+|---|---|
+| New list is longer than saved | First N entries are reported as new |
+| Same length but top entry changed | Entries not present before are reported as new |
+| List was empty, now has listings | All current listings are reported as new |
+| List is empty or unchanged | No notification |
 
-echo ""
-info "Configuring crontab..."
+### Watchlist changes without re-running init
 
-CURRENT_CRON="$(crontab -l 2>/dev/null || true)"
+- If you remove an item from `watchlist.json`, the old scan file remains on disk but is ignored.
+- If you add or replace an item and its scan file is missing, `check.py` now bootstraps a baseline for that item automatically (without sending a "new listing" alert on that first run).
+- Re-running `init.py` is still recommended after bigger watchlist edits to keep scan files clean and synchronized.
 
-if echo "$CURRENT_CRON" | grep -qF "$CRON_MARKER"; then
-    info "Entry already exists in crontab - updating."
-    NEW_CRON="$(echo "$CURRENT_CRON" | grep -v "$CRON_MARKER" | grep -v "$CHECK_SCRIPT")"
-else
-    NEW_CRON="$CURRENT_CRON"
-fi
+## Error handling
 
-(
-    echo "$NEW_CRON"
-    echo "$CRON_JOB $CRON_MARKER"
-) | grep -v '^$' | crontab -   # strip leading blank lines
+| Situation | Behaviour |
+|---|---|
+| Page unreachable / timeout | Push notification sent about the failure; scan file unchanged |
+| No listings on page | Saves empty list; notifies when first listing appears |
+| Push notification fails | Scan file is still updated to keep state in sync; push failure is logged |
+| Missing scan file | Baseline is auto-created from current listings for that item |
+| Missing `watchlist.json` | Script exits with an error |
 
-success "Crontab updated. Job scheduled every $CRON_INTERVAL minutes."
+## Stopping the monitor
 
-echo ""
-info "Current crontab:"
-crontab -l
+```bash
+crontab -e
+# Remove the line containing "discogs-monitor"
+```
 
-# ─────────────────────── Test push notification ──────────────────────────────
+## A note on rate limiting
 
-echo ""
-info "Sending test push notification via ntfy..."
-
-WATCHLIST_COUNT=$($PYTHON -c "
-import json
-with open('$SCRIPT_DIR/watchlist.json') as f:
-    data = json.load(f)
-print(len(data))
-")
-
-PUSH_BODY="Monitor started successfully!
-
-Watching: $WATCHLIST_COUNT record(s)
-Check interval: every $CRON_INTERVAL minutes
-Log file: $LOG_FILE"
-
-if send_push "🎵 Discogs Monitor - started!" "$PUSH_BODY" "default" "white_check_mark"; then
-    NTFY_TOPIC=$($PYTHON -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); from config import NTFY_TOPIC; print(NTFY_TOPIC)")
-    success "Test push sent to topic: $NTFY_TOPIC"
-else
-    error "Failed to send test push (check your ntfy configuration and connection)."
-fi
-
-# ─────────────────────── Summary ─────────────────────────────────────────────
-
-echo ""
-echo "========================================"
-echo " All done!"
-echo "========================================"
-echo ""
-
-# Values from Python config
-DISPLAY_NTFY_URL=$NTFY_BASE_URL
-DISPLAY_NTFY_TOPIC=$($PYTHON -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); from config import NTFY_TOPIC; print(NTFY_TOPIC)")
-DISPLAY_LOG_DIR=$LOG_DIR
-
-echo "  ntfy URL:      $DISPLAY_NTFY_URL"
-echo "  ntfy topic:    $DISPLAY_NTFY_TOPIC"
-echo "  Logs:          $DISPLAY_LOG_DIR"
-echo "  Interval:      every $CRON_INTERVAL minutes"
-echo ""
-echo "  To stop monitoring:"
-echo "    crontab -e   (remove the line containing 'discogs-monitor')"
-echo ""
-echo "  To trigger a check manually:"
-echo "    cd \"$SCRIPT_DIR\" && $PYTHON check.py"
-echo ""
+Discogs may block excessive traffic. The script uses a realistic User-Agent and waits 3 seconds between requests. With a 5-minute cron interval and e.g. 10 releases, that's roughly one request every 30 seconds – well within safe limits. If you start getting 429 errors, increase `DELAY_BETWEEN` in both scripts.
