@@ -67,7 +67,9 @@ export DISCOGS_LOG_BACKUPS=5                           # Keep 5 old log files
 # Scraping
 export DISCOGS_TIMEOUT=15                              # Request timeout (seconds)
 export DISCOGS_RETRIES=3                               # Retry attempts
-export DISCOGS_DELAY=3                                 # Delay between requests (seconds)
+export DISCOGS_DELAY=4                                 # Base delay between requests (seconds)
+export DISCOGS_DELAY_JITTER=5                          # Random extra delay per request (0..N seconds) => 4-9s by default
+export DISCOGS_STARTUP_JITTER=90                       # Random delay before each check run (0..N seconds)
 
 # ntfy base URL
 export DISCOGS_NTFY_URL=https://ntfy.sh                # or your self-hosted instance
@@ -97,7 +99,7 @@ chmod +x start.sh
 `start.sh` will:
 1. Check for Python, curl, and required libraries (installing them if needed)
 2. Run `init.py` to save the current state of all watched listings
-3. Add `check.py` to your user crontab (no sudo required), running every 5 minutes
+3. Add `check.py` to your user crontab (no sudo required), running every 10 minutes
 4. Send a test push notification so you can confirm ntfy is working
 
 ## Manual usage
@@ -146,4 +148,4 @@ crontab -e
 
 ## A note on rate limiting
 
-Discogs may block excessive traffic. The script uses a realistic User-Agent and waits 3 seconds between requests. With a 5-minute cron interval and e.g. 10 releases, that's roughly one request every 30 seconds – well within safe limits. If you start getting 429 errors, increase `DELAY_BETWEEN` in both scripts.
+Discogs may block excessive traffic. The script uses a realistic User-Agent, retry/backoff, and jittered timing. With a 10-minute cron interval and e.g. 10 releases, that's roughly one request every 60 seconds on average, with small random offsets to avoid a perfectly regular pattern. If you start getting 429/403 errors, increase `DELAY_BETWEEN`, `DELAY_JITTER`, and `DISCOGS_STARTUP_JITTER`.
