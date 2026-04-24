@@ -46,10 +46,11 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 REQUEST_TIMEOUT = _get_int_env("DISCOGS_TIMEOUT", 15, min_val=5)  # seconds
-REQUEST_RETRIES = _get_int_env("DISCOGS_RETRIES", 3, min_val=1)
-DELAY_BETWEEN = _get_int_env("DISCOGS_DELAY", 4, min_val=1)  # base seconds between requests
-DELAY_JITTER = _get_int_env("DISCOGS_DELAY_JITTER", 5, min_val=0)  # extra random seconds (base+0..jitter)
+REQUEST_RETRIES = _get_int_env("DISCOGS_RETRIES", 4, min_val=1)
+RETRIES_ON_403 = _get_int_env("DISCOGS_RETRIES_403", 5, min_val=2)  # more retries on rate limit
+DELAY_BETWEEN = _get_int_env("DISCOGS_DELAY", 8, min_val=2)  # base seconds between requests
+DELAY_JITTER = _get_int_env("DISCOGS_DELAY_JITTER", 10, min_val=0)  # extra random seconds (base+0..jitter)
 CHECK_STARTUP_JITTER = _get_int_env("DISCOGS_STARTUP_JITTER", 90, min_val=0)  # random delay at check start (seconds)
 
 # Retry configuration
-MAX_RETRY_DELAY = 30  # seconds - exponential backoff cap
+MAX_RETRY_DELAY = 60  # seconds - exponential backoff cap
