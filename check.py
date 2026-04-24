@@ -263,7 +263,7 @@ def main():
                     url,
                     config.HEADERS,
                     config.REQUEST_TIMEOUT,
-                    retries=config.REQUEST_RETRIES,
+                    retries=config.RETRIES_ON_403,
                     max_retry_delay=config.MAX_RETRY_DELAY,
                 )
                 bootstrap_scan = build_scan_data(idx, name, url, bootstrap_items)
@@ -291,6 +291,23 @@ def main():
             # URL validation error
             log(f"      [URL ERROR] {val_exc}")
             overall_errors.append(f"#{idx} '{name}': {val_exc}")
+            if idx < len(watchlist) - 1:
+                sleep_with_jitter(config.DELAY_BETWEEN, config.DELAY_JITTER)
+            continue
+        except requests.HTTPError as http_exc:
+            # Handle HTTP errors specifically
+            status_code = http_exc.response.status_code if http_exc.response is not None else 0
+            err_msg = f"HTTP {status_code}: {str(http_exc)}"
+            log(f"      [HTTP ERROR] {err_msg}")
+            overall_errors.append(f"#{idx} '{name}': {err_msg}")
+            
+            # If 403/429 (rate limit), sleep MUCH longer and skip remaining items
+            if status_code in {403, 429}:
+                wait_time = 120  # 2 minutes on rate limit
+                log(f"      Rate limited (HTTP {status_code}). Stopping scan and waiting {wait_time}s...")
+                time.sleep(wait_time)
+                break  # Exit the watchlist loop entirely
+            
             if idx < len(watchlist) - 1:
                 sleep_with_jitter(config.DELAY_BETWEEN, config.DELAY_JITTER)
             continue
