@@ -14,7 +14,7 @@ set -euo pipefail
 NTFY_BASE_URL="${DISCOGS_NTFY_URL:-https://ntfy.sh}"
 
 # Scans interval [min]
-CRON_INTERVAL=10
+CRON_INTERVAL=15
 
 # Python interpreter
 PYTHON="${PYTHON:-python3}"
