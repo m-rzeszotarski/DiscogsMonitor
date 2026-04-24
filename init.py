@@ -12,6 +12,8 @@ import random
 import sys
 import time
 
+import requests
+
 import config
 from discogs_lib import (
     scan_file_name,
@@ -23,6 +25,29 @@ from discogs_lib import (
 
 def log(msg: str):
     print(msg)
+
+
+def sanitize_header(text: str) -> str:
+    """Remove non-ASCII chars from HTTP header values."""
+    sanitized = "".join(char for char in text if ord(char) < 128)
+    return sanitized.strip()
+
+
+def send_push(title: str, body: str, priority: str = "default", tags: str = "") -> None:
+    """Send a best-effort ntfy notification when topic is configured."""
+    if not config.NTFY_TOPIC.strip():
+        raise ValueError("NTFY_TOPIC is empty. Set it in config.py before sending notifications.")
+
+    url = f"{config.NTFY_BASE_URL}/{config.NTFY_TOPIC}"
+    headers = {
+        "Title": sanitize_header(title),
+        "Priority": priority,
+    }
+    if tags:
+        headers["Tags"] = tags
+
+    response = requests.post(url, data=body, headers=headers, timeout=10)
+    response.raise_for_status()
 
 
 def sleep_with_jitter(base_delay: int, jitter: int) -> None:
@@ -146,6 +171,29 @@ def main():
             log(f"  #{e['id']} '{e['name']}': {e['error']}")
     else:
         log("No errors.")
+
+    try:
+        error_lines = "\n".join(f"- #{entry['id']} {entry['name']}: {entry['error']}" for entry in errors[:5])
+        push_body = (
+            f"Baseline scan finished.\n\n"
+            f"Items scanned: {len(watchlist)}\n"
+            f"Errors: {len(errors)}\n"
+            f"Scans dir: {config.SCANS_DIR}"
+        )
+        if error_lines:
+            push_body = f"{push_body}\n\nRecent errors:\n{error_lines}"
+
+        send_push(
+            "DiscogsMonitor - init complete",
+            push_body,
+            priority="high" if errors else "default",
+            tags="white_check_mark" if not errors else "warning",
+        )
+        log("[INFO] Init notification sent.")
+    except ValueError:
+        log("[INFO] Init notification skipped because NTFY_TOPIC is empty.")
+    except Exception as exc:
+        log(f"[WARN] Failed to send init notification: {exc}")
 
 
 

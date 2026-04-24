@@ -100,9 +100,9 @@ chmod +x start.sh
 
 `start.sh` will:
 1. Check for Python, curl, and required libraries (installing them if needed)
-2. Run `init.py` to save the current state of all watched listings
+2. Run `init.py` to save the current state of all watched listings and send the baseline summary notification
 3. Add `check.py` to your user crontab (no sudo required), running every 15 minutes
-4. Send a test push notification so you can confirm ntfy is working
+4. Print the resulting configuration summary and cron schedule
 
 ## Manual usage
 
@@ -110,6 +110,8 @@ Run the baseline scan manually:
 ```bash
 python3 init.py
 ```
+
+If `NTFY_TOPIC` is configured, `init.py` also sends a short completion summary after the baseline scan finishes.
 
 Run a check manually:
 ```bash

@@ -382,7 +382,7 @@ CURRENT_CRON="$(crontab -l 2>/dev/null || true)"
 
 if echo "$CURRENT_CRON" | grep -qF "$CRON_MARKER"; then
     info "Entry already exists in crontab - updating."
-    NEW_CRON="$(echo "$CURRENT_CRON" | grep -v "$CRON_MARKER" | grep -v "$CHECK_SCRIPT")"
+    NEW_CRON="$(printf '%s\n' "$CURRENT_CRON" | grep -vF "$CRON_MARKER" | grep -vF "$CHECK_SCRIPT" || true)"
 else
     NEW_CRON="$CURRENT_CRON"
 fi
@@ -399,31 +399,6 @@ success "Crontab updated. Job scheduled every $CRON_INTERVAL minutes."
 echo ""
 info "Current crontab:"
 crontab -l
-
-# ─────────────────────── Test push notification ──────────────────────────────
-
-echo ""
-info "Sending test push notification via ntfy..."
-
-WATCHLIST_COUNT=$($PYTHON -c "
-import json
-with open('$SCRIPT_DIR/watchlist.json') as f:
-    data = json.load(f)
-print(len(data))
-")
-
-PUSH_BODY="Monitor started successfully!
-
-Watching: $WATCHLIST_COUNT record(s)
-Check interval: every $CRON_INTERVAL minutes
-Log file: $LOG_FILE"
-
-if send_push "🎵 DiscogsMonitor - started!" "$PUSH_BODY" "default" "white_check_mark"; then
-    NTFY_TOPIC=$($PYTHON -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); from config import NTFY_TOPIC; print(NTFY_TOPIC)")
-    success "Test push sent to topic: $NTFY_TOPIC"
-else
-    error "Failed to send test push (check your ntfy configuration and connection)."
-fi
 
 # ─────────────────────── Summary ─────────────────────────────────────────────
 
