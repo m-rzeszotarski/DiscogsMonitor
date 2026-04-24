@@ -300,10 +300,21 @@ def main():
             err_msg = f"HTTP {status_code}: {str(http_exc)}"
             log(f"      [HTTP ERROR] {err_msg}")
             overall_errors.append(f"#{idx} '{name}': {err_msg}")
+
+            try:
+                send_push(
+                    f"DiscogsMonitor – scan error: {name}",
+                    f"Failed to fetch page.\n\nError: {err_msg}\n\nURL: {url}",
+                    priority="high",
+                    tags="warning",
+                )
+                log("      Error push sent.")
+            except Exception as push_exc:
+                log(f"      [PUSH ERROR] {push_exc}")
             
             # If 403/429 (rate limit), sleep MUCH longer and skip remaining items
             if status_code in {403, 429}:
-                wait_time = 120  # 2 minutes on rate limit
+                wait_time = config.RATE_LIMIT_COOLDOWN_SECONDS
                 log(f"      Rate limited (HTTP {status_code}). Stopping scan and waiting {wait_time}s...")
                 time.sleep(wait_time)
                 break  # Exit the watchlist loop entirely
