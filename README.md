@@ -66,10 +66,12 @@ export DISCOGS_LOG_BACKUPS=5                           # Keep 5 old log files
 
 # Scraping
 export DISCOGS_TIMEOUT=15                              # Request timeout (seconds)
-export DISCOGS_RETRIES=3                               # Retry attempts
-export DISCOGS_DELAY=4                                 # Base delay between requests (seconds)
-export DISCOGS_DELAY_JITTER=5                          # Random extra delay per request (0..N seconds) => 4-9s by default
-export DISCOGS_STARTUP_JITTER=90                       # Random delay before each check run (0..N seconds)
+export DISCOGS_RETRIES=2                               # Retry attempts for generic network/server errors
+export DISCOGS_RETRIES_403=5                           # Retry attempts specifically for 403/429 responses
+export DISCOGS_403_COOLDOWN=600                        # Cooldown after repeated 403/429 before continuing checks (seconds)
+export DISCOGS_DELAY=15                                # Base delay between requests (seconds)
+export DISCOGS_DELAY_JITTER=20                         # Random extra delay per request (0..N seconds) => 15-35s by default
+export DISCOGS_STARTUP_JITTER=180                      # Random delay before each check run (0..N seconds)
 
 # ntfy base URL
 export DISCOGS_NTFY_URL=https://ntfy.sh                # or your self-hosted instance
@@ -99,7 +101,7 @@ chmod +x start.sh
 `start.sh` will:
 1. Check for Python, curl, and required libraries (installing them if needed)
 2. Run `init.py` to save the current state of all watched listings
-3. Add `check.py` to your user crontab (no sudo required), running every 10 minutes
+3. Add `check.py` to your user crontab (no sudo required), running every 15 minutes
 4. Send a test push notification so you can confirm ntfy is working
 
 ## Manual usage
@@ -148,4 +150,4 @@ crontab -e
 
 ## A note on rate limiting
 
-Discogs may block excessive traffic. The script uses a realistic User-Agent, retry/backoff, and jittered timing. With a 10-minute cron interval and e.g. 10 releases, that's roughly one request every 60 seconds on average, with small random offsets to avoid a perfectly regular pattern. If you start getting 429/403 errors, increase `DELAY_BETWEEN`, `DELAY_JITTER`, and `DISCOGS_STARTUP_JITTER`.
+Discogs may block excessive traffic. The script uses randomized browser-like request headers, session warmup, retry/backoff, and jittered timing. With a 15-minute cron interval and e.g. 10 releases, that's roughly one request every 90 seconds on average, with small random offsets to avoid a perfectly regular pattern. If you start getting 429/403 errors, increase `DISCOGS_DELAY`, `DISCOGS_DELAY_JITTER`, `DISCOGS_STARTUP_JITTER`, and (if needed) `DISCOGS_403_COOLDOWN`.

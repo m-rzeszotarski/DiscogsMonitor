@@ -5,8 +5,8 @@ DiscogsMonitor/check.py
 Checks Discogs listings against the saved baseline and sends a push
 notification via ntfy when new listings appear.
 
-Intended to be run every 5 minutes via cron (set up by start.sh):
-    */5 * * * * cd /path/to/project && python3 check.py >> logs/check.log 2>&1
+Intended to be run every 15 minutes via cron (set up by start.sh):
+    */15 * * * * cd /path/to/project && python3 check.py >> logs/check.log 2>&1
 """
 
 import json
